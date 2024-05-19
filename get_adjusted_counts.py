@@ -5,10 +5,11 @@ import time
 from datetime import datetime
 from decimal import Decimal
 from urllib.parse import quote
-
+from services.university_finder import finder
 import polars as pl
 import requests
 from retrying import retry
+from logging.handlers import TimedRotatingFileHandler
 
 backoff_time_in_ms = 180000
 backoff_time_in_seconds = 180
@@ -17,8 +18,23 @@ backoff_time_in_seconds = 180
 min_page_count = 6
 
 # Configure logging
-logging.basicConfig(level=logging.INFO)
+log_filename = f"{datetime.now().strftime('%Y-%m-%d')}-log"
+log_filepath = os.path.join('logs', log_filename)
+os.makedirs('logs', exist_ok=True)
+
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
+
+# Create a TimedRotatingFileHandler
+file_handler = TimedRotatingFileHandler(log_filepath, when='midnight', backupCount=7)
+file_handler.setLevel(logging.INFO)
+
+# Create a formatter and set it for the handler
+formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+file_handler.setFormatter(formatter)
+
+# Add the file handler to the logger
+logger.addHandler(file_handler)
 
 
 def generate_author_pub_count_api_url_with_year(author, year=None):
@@ -330,7 +346,7 @@ def calculate_institution_score(institution: str, df: pl.DataFrame) -> dict:
 
 def generate_all_scores():
     logger.info("Generating scores for all institutions")
-    df_cs_rankings = pl.read_csv(os.path.join('../files', 'csrankings.csv'))
+    df_cs_rankings = pl.read_csv(r'C:\Users\jmckerra\PycharmProjects\comp_sys_rankings_backend\files\csrankings.csv')
 
     # Get the unique values from the 'affiliation' column
     affiliations = df_cs_rankings['affiliation'].unique()
@@ -343,13 +359,14 @@ def generate_all_scores():
 
     school_scores = {}
     for school in affiliations_set:
-        school_score = calculate_institution_score(school, df_cs_rankings)
-        school_scores[school] = school_score
-        write_dict_to_file(data=school_scores, file_path="all-school-scores")
+        if finder.search_university(school):
+            school_score = calculate_institution_score(school, df_cs_rankings)
+            school_scores[school] = school_score
+            write_dict_to_file(data=school_scores, file_path="all-school-scores")
 
-        processed_schools += 1
-        percentage_completed = (processed_schools / total_schools) * 100
-        logger.info(f"Processed {processed_schools} out of {total_schools} schools ({percentage_completed:.2f}%)")
+            processed_schools += 1
+            percentage_completed = (processed_schools / total_schools) * 100
+            logger.info(f"Processed {processed_schools} out of {total_schools} schools ({percentage_completed:.2f}%)")
 
     return school_scores
 
