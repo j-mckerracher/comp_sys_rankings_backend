@@ -10,12 +10,12 @@ import polars as pl
 import requests
 from retrying import retry
 from logging.handlers import TimedRotatingFileHandler
+from area_conference_mapping import categorize_venue
 
+# global variables
 backoff_time_in_ms = 180000
 backoff_time_in_seconds = 180
-# backoff_time_in_ms = 60000
-# backoff_time_in_seconds = 60
-min_page_count = 6
+min_page_count = 12
 
 # Configure logging
 log_filename = f"{datetime.now().strftime('%Y-%m-%d')}-log"
@@ -113,72 +113,19 @@ def convert_to_int(page: str):
         return roman_numerals.get(page.lower(), 0)
 
 
-def categorize_venue(venue: str) -> str | None:
-    if not venue:
-        return None
-
-    # Check if venue is a list and convert it to a string
-    if isinstance(venue, list):
-        venue = ', '.join(venue)
-
-    conferences = {
-        'sys_arch': ['ASPLOS', 'ASPLOS (1)', 'ASPLOS (2)', 'ASPLOS (3)', 'ISCA', 'MICRO', 'MICRO (1)', 'MICRO (2)',
-                     'HPCA'],
-        'sys_net': ['SIGCOMM', 'NSDI'],
-        'sys_sec': ['CCS', 'ACM Conference on Computer and Communications Security', 'USENIX Security',
-                    'USENIX Security Symposium', 'NDSS', 'IEEE Symposium on Security and Privacy', 'SP', 'S&P'],
-        'sys_db': ['SIGMOD Conference', 'VLDB', 'PVLDB', 'Proc. VLDB Endow.'],
-        'sys_design': ['DAC', 'ICCAD'],
-        'sys_embed': ['EMSOFT', 'RTAS', 'RTSS'],
-        'sys_hpc': ['HPDC', 'ICS', 'SC'],
-        'sys_mob': ['MobiSys', 'MobiCom', 'MOBICOM', 'SenSys'],
-        'sys_mes': ['IMC', 'Internet Measurement Conference', 'Proc. ACM Meas. Anal. Comput. Syst.'],
-        'sys_os': ['SOSP', 'OSDI', 'EuroSys', 'USENIX Annual Technical Conference',
-                   'USENIX Annual Technical Conference, General Track', 'FAST'],
-        'sys_pl': ['PLDI', 'POPL', 'ICFP', 'OOPSLA', 'OOPSLA/ECOOP'],
-        'sys_se': ['SIGSOFT FSE', 'ESEC/SIGSOFT FSE', 'ICSE', 'ICSE (1)', 'ICSE (2)']
-    }
-
-    conf_short = {
-        'sys_arch': ['ASPLOS', 'ISCA', 'MICRO', 'HPCA'],
-        'sys_net': ['SIGCOMM', 'NSDI'],
-        'sys_sec': ['CCS', 'USENIX Security', 'NDSS', 'Oakland'],
-        'sys_db': ['SIGMOD', 'VLDB', 'ICDE', 'PODS'],
-        'sys_design': ['DAC', 'ICCAD'],
-        'sys_embed': ['EMSOFT', 'RTAS', 'RTSS'],
-        'sys_hpc': ['HPDC', 'ICS', 'SC'],
-        'sys_mob': ['MobiSys', 'MobiCom', 'SenSys'],
-        'sys_mes': ['IMC', 'SIGMETRICS'],
-        'sys_os': ['SOSP', 'OSDI', 'EuroSys', 'USENIX ATC', 'FAST'],
-        'sys_pl': ['PLDI', 'POPL', 'ICFP', 'OOPSLA'],
-        'sys_se': ['FSE', 'ICSE', 'ASE', 'ISSTA']
-    }
-
-    for area, confs in conf_short.items():
-        for conf in confs:
-            if venue.casefold() == conf.casefold():
-                return area
-
-    for area, confs in conferences.items():
-        for conf in confs:
-            if venue.casefold() == conf.casefold():
-                return area
-
-    return None
-
-
 def update_dict_scores(result: dict, author: str, area_scores: str, this_hit_area: str,
                        this_hit_score: Decimal) -> None:
     try:
         if this_hit_area not in result[area_scores]:
             result[area_scores][this_hit_area] = 0
 
-        result[area_scores][this_hit_area] = this_hit_score
+        result[area_scores][this_hit_area] += this_hit_score
 
         if this_hit_area not in result["authors"][author]:
             result["authors"][author][this_hit_area] = 0
 
-        result["authors"][author][this_hit_area] = this_hit_score
+        result["authors"][author][this_hit_area] += this_hit_score
+        result["authors"][author]["paper_count"] += 1
     except KeyError as e:
         logger.error(f"update_dict_scores encountered an error: {e}")
 
@@ -204,7 +151,7 @@ def calculate_score(json_data: dict, school_result: dict, author: str):
         page_range = hit_info.get("pages", "1")
         page_count = count_pages(page_range)
 
-        this_hit_area = categorize_venue(hit_info.get("venue"))
+        this_hit_area = categorize_venue.categorize_venue(hit_info.get("venue"))
         if not this_hit_area:
             continue
 
@@ -239,7 +186,7 @@ def retry_if_429_error(exception):
     return isinstance(exception, requests.exceptions.RequestException) and exception.response.status_code == 429
 
 
-def send_get_request(api_url: str) -> dict:
+def send_get_request(api_url: str) -> dict | None:
     try:
         response = requests.get(api_url)
         response.raise_for_status()  # Raise an exception for 4xx or 5xx status codes
@@ -251,8 +198,14 @@ def send_get_request(api_url: str) -> dict:
             return response.json()
 
     except requests.exceptions.RequestException as e:
-        if e.response.status_code == 429:
-            logger.info(f"Too Many Requests, retrying after {backoff_time_in_seconds} seconds.")
+        if isinstance(e, requests.exceptions.HTTPError) and e.response is not None:
+            if e.response.status_code == 429:
+                logger.info(f"Too Many Requests, retrying after {backoff_time_in_seconds} seconds.")
+            elif e.response.status_code == 500:
+                logger.error(f"Internal Server Error (500) occurred for URL: {api_url}")
+                return {}  # Return an empty dictionary to skip processing the response
+            else:
+                logger.error(f"Error occurred during the request: {str(e)}")
         else:
             logger.error(f"Error occurred during the request: {str(e)}")
         raise
@@ -264,9 +217,14 @@ def send_get_request(api_url: str) -> dict:
 
 def author_has_less_than_1001_hits(url: str) -> tuple:
     json_data = send_get_request(url)
-    hits = json_data["result"]["hits"]
-    hit_key_value = hits.get("hit", [])
-    return len(hit_key_value) < 1001, json_data
+    result = False
+    if json_data:
+        hits = json_data["result"]["hits"]
+        hit_key_value = hits.get("hit", [])
+        if len(hit_key_value) < 1001:
+            result = True
+
+    return result, json_data
 
 
 @retry(stop_max_attempt_number=3, wait_fixed=backoff_time_in_ms, retry_on_exception=retry_if_429_error)
@@ -282,12 +240,11 @@ def get_author_publication_score(author: str, school_result: dict):
     :param author: The name of the author.
     :return: The publication score as a Decimal value.
     """
-    ex = "https://dblp.dagstuhl.de/search/publ/api?q=A.%20Aldo%20Faisal&h=1000&format=json"
     url = generate_author_pub_count_api_url_with_year(author)
     has_less_than_1001_hits, api_call_json = author_has_less_than_1001_hits(url)
     if has_less_than_1001_hits:
         calculate_score(api_call_json, school_result, author)
-    else:
+    elif api_call_json:
         for year in get_year_list():
             api_url = generate_author_pub_count_api_url_with_year(author, year=year)
             result = send_get_request(api_url)
@@ -327,7 +284,7 @@ def calculate_institution_score(institution: str, df: pl.DataFrame) -> dict:
     institution_result = {
         'total_score': Decimal(0),
         'area_scores': {},
-        'authors': {author: {} for author in authors}
+        'authors': {author: {'paper_count': 0} for author in authors}
     }
 
     for author in authors:
@@ -352,21 +309,22 @@ def generate_all_scores():
     affiliations = df_cs_rankings['affiliation'].unique()
 
     # Convert the unique values to a set
-    affiliations_set = set(affiliations)
+    prelim_affiliations_set = set(affiliations)
+    affiliations_set = {uni for uni in prelim_affiliations_set if finder.search_university(uni)}
+    clean_data(affiliations_set)
 
     total_schools = len(affiliations_set)
     processed_schools = 0
 
     school_scores = {}
     for school in affiliations_set:
-        if finder.search_university(school):
-            school_score = calculate_institution_score(school, df_cs_rankings)
-            school_scores[school] = school_score
-            write_dict_to_file(data=school_scores, file_path="all-school-scores")
+        school_score = calculate_institution_score(school, df_cs_rankings)
+        school_scores[school] = school_score
+        write_dict_to_file(data=school_scores, file_path="all-school-scores")
 
-            processed_schools += 1
-            percentage_completed = (processed_schools / total_schools) * 100
-            logger.info(f"Processed {processed_schools} out of {total_schools} schools ({percentage_completed:.2f}%)")
+        processed_schools += 1
+        percentage_completed = (processed_schools / total_schools) * 100
+        logger.info(f"Processed {processed_schools} out of {total_schools} schools ({percentage_completed:.2f}%)")
 
     return school_scores
 
@@ -403,6 +361,24 @@ def format_time(seconds):
     return f"{int(days):02d}:{int(hours):02d}:{int(minutes):02d}:{int(seconds):02d}"
 
 
+def add_author_count(_data):
+    new_data = {}
+    for school, info in _data.items():
+        author_count = len(info["authors"])
+        new_info = info.copy()  # Create a copy to avoid modifying the original data
+        new_info["author_count"] = author_count
+        new_data[school] = new_info
+
+    write_dict_to_file(data=new_data, file_path="all-school-scores-updated")
+
+
+def clean_data(_data: set):
+    remove_list = ["HUST", "UFF", "UNSW"]
+    for item in remove_list:
+        if item in _data:
+            _data.remove(item)
+
+
 def log_total_time_taken(start, end):
     execution_time = end - start
     formatted_time = format_time(execution_time)
@@ -411,6 +387,7 @@ def log_total_time_taken(start, end):
 
 start_time = time.time()
 all_school_scores = generate_all_scores()
+add_author_count(all_school_scores)
 end_time = time.time()
 
 log_total_time_taken(start_time, end_time)

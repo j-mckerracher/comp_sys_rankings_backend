@@ -9,10 +9,6 @@ class UniversityFinder:
             self.data = set()
             for university in universities:
                 self.data.add(university['name'])
-                if university['alias'] != "NOT AVAILABLE":
-                    aliases = university['alias'].split("|")
-                    for alias in aliases:
-                        self.data.add(alias.strip())
 
     def search_university(self, university_name: str) -> bool:
         university_name = university_name.upper()
