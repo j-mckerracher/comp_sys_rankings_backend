@@ -16,6 +16,8 @@ from area_conference_mapping import categorize_venue
 backoff_time_in_ms = 180000
 backoff_time_in_seconds = 180
 min_page_count = 12
+missed_authors = set()
+retry_interval_seconds = 600
 
 # Configure logging
 log_filename = f"{datetime.now().strftime('%Y-%m-%d')}-log"
@@ -35,6 +37,28 @@ file_handler.setFormatter(formatter)
 
 # Add the file handler to the logger
 logger.addHandler(file_handler)
+
+
+def delete_current_day_log_files():
+    log_directory = 'logs'
+    current_date = datetime.now().strftime('%Y-%m-%d')
+    log_filename_pattern = f"{current_date}-log"
+
+    try:
+        # Iterate over the files in the 'logs' directory
+        for filename in os.listdir(log_directory):
+            file_path = os.path.join(log_directory, filename)
+
+            # Check if the file is a regular file and matches the current day's log filename pattern
+            if os.path.isfile(file_path) and filename.startswith(log_filename_pattern):
+                os.remove(file_path)
+                print(f"Deleted log file: {filename}")
+
+    except FileNotFoundError:
+        print(f"The 'logs' directory does not exist.")
+
+    except Exception as e:
+        print(f"An error occurred while deleting log files: {str(e)}")
 
 
 def generate_author_pub_count_api_url_with_year(author, year=None):
@@ -186,7 +210,7 @@ def retry_if_429_error(exception):
     return isinstance(exception, requests.exceptions.RequestException) and exception.response.status_code == 429
 
 
-def send_get_request(api_url: str) -> dict | None:
+def send_get_request(api_url: str, school, author) -> dict | None:
     try:
         response = requests.get(api_url)
         response.raise_for_status()  # Raise an exception for 4xx or 5xx status codes
@@ -203,7 +227,13 @@ def send_get_request(api_url: str) -> dict | None:
                 logger.info(f"Too Many Requests, retrying after {backoff_time_in_seconds} seconds.")
             elif e.response.status_code == 500:
                 logger.error(f"Internal Server Error (500) occurred for URL: {api_url}")
+
+                missed_authors.add(f"{school.replace(' ', '-')} {author.replace(' ', '-')}")
                 return {}  # Return an empty dictionary to skip processing the response
+            elif e.response.status_code == 413:
+                logger.error(f"Payload Too Large! {e}")
+                missed_authors.add(api_url)
+                return {}
             else:
                 logger.error(f"Error occurred during the request: {str(e)}")
         else:
@@ -215,8 +245,8 @@ def send_get_request(api_url: str) -> dict | None:
         raise
 
 
-def author_has_less_than_1001_hits(url: str) -> tuple:
-    json_data = send_get_request(url)
+def author_has_less_than_1001_hits(url: str, school: str, author: str) -> tuple:
+    json_data = send_get_request(url, school, author)
     result = False
     if json_data:
         hits = json_data["result"]["hits"]
@@ -228,7 +258,7 @@ def author_has_less_than_1001_hits(url: str) -> tuple:
 
 
 @retry(stop_max_attempt_number=3, wait_fixed=backoff_time_in_ms, retry_on_exception=retry_if_429_error)
-def get_author_publication_score(author: str, school_result: dict):
+def get_author_publication_score(author: str, school_result: dict, school: str):
     """
     Retrieves the publication score for a given author.
 
@@ -241,13 +271,13 @@ def get_author_publication_score(author: str, school_result: dict):
     :return: The publication score as a Decimal value.
     """
     url = generate_author_pub_count_api_url_with_year(author)
-    has_less_than_1001_hits, api_call_json = author_has_less_than_1001_hits(url)
+    has_less_than_1001_hits, api_call_json = author_has_less_than_1001_hits(url, school, author)
     if has_less_than_1001_hits:
         calculate_score(api_call_json, school_result, author)
     elif api_call_json:
         for year in get_year_list():
             api_url = generate_author_pub_count_api_url_with_year(author, year=year)
-            result = send_get_request(api_url)
+            result = send_get_request(api_url, school, author)
             calculate_score(result, school_result, author)
 
 
@@ -289,7 +319,7 @@ def calculate_institution_score(institution: str, df: pl.DataFrame) -> dict:
 
     for author in authors:
         logger.info(f"Retrieving publication score for author: {author}")
-        get_author_publication_score(author, institution_result)
+        get_author_publication_score(author, institution_result, institution)
 
     # Sum up the scores of all authors for the institution
     total_score = Decimal(0)
@@ -373,7 +403,7 @@ def add_author_count(_data):
 
 
 def clean_data(_data: set):
-    remove_list = ["HUST", "UFF", "UNSW"]
+    remove_list = ["HUST", "UFF", "UNSW", "Heidelberg University", "JUST", "CMI"]
     for item in remove_list:
         if item in _data:
             _data.remove(item)
@@ -385,9 +415,25 @@ def log_total_time_taken(start, end):
     logger.info(f"Execution time of generate_all_scores(): {formatted_time} (days:hours:minutes:seconds)")
 
 
+def retry_missed_authors(school_scores):
+    while missed_authors:
+        for entry in missed_authors.copy():
+            school, author = entry.split(' ', 2)
+            school = school.replace('-', ' ')
+            author = author.replace('-', ' ')
+            url = generate_author_pub_count_api_url_with_year(author)
+            result = send_get_request(url, school, author)
+            if result:
+                calculate_score(result, school_scores[school], author)
+                missed_authors.remove(entry)
+        time.sleep(retry_interval_seconds)
+
+
+
 start_time = time.time()
 all_school_scores = generate_all_scores()
+logger.info(f"Missed authors: {missed_authors}")
+retry_missed_authors(all_school_scores)
 add_author_count(all_school_scores)
 end_time = time.time()
-
 log_total_time_taken(start_time, end_time)
