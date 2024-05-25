@@ -429,7 +429,6 @@ def retry_missed_authors(school_scores):
         time.sleep(retry_interval_seconds)
 
 
-
 start_time = time.time()
 all_school_scores = generate_all_scores()
 logger.info(f"Missed authors: {missed_authors}")
