@@ -429,10 +429,22 @@ def retry_missed_authors(school_scores):
         time.sleep(retry_interval_seconds)
 
 
-start_time = time.time()
-all_school_scores = generate_all_scores()
-logger.info(f"Missed authors: {missed_authors}")
-retry_missed_authors(all_school_scores)
-add_author_count(all_school_scores)
-end_time = time.time()
-log_total_time_taken(start_time, end_time)
+def run():
+    start_time = time.time()
+
+    # get all school scores
+    all_school_scores = generate_all_scores()
+
+    # get the missed authors data until missed_authors is empty
+    logger.info(f"Missed authors: {missed_authors}")
+    retry_missed_authors(all_school_scores)
+
+    # adds the author count key to all_school_scores
+    add_author_count(all_school_scores)
+
+    end_time = time.time()
+    log_total_time_taken(start_time, end_time)
+
+
+if __name__ == 'main':
+    run()
