@@ -43,7 +43,6 @@ class CategorizeVenue:
                 'Supercomputing',
                 'HPDC',
                 'ICS',
-                'HPDC'
             ],
             'mobile_computing': [
                 'MobiSys',

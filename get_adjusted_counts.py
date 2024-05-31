@@ -11,6 +11,7 @@ import requests
 from retrying import retry
 from logging.handlers import TimedRotatingFileHandler
 from area_conference_mapping import categorize_venue
+from services.page_counter import page_range_counter
 
 # global variables
 backoff_time_in_ms = 180000
@@ -71,58 +72,6 @@ def generate_author_pub_count_api_url_with_year(author, year=None):
     return f"{publication_url}{formatted_author}{json_format}"
 
 
-def count_pages(page_range: str):
-    try:
-        if not page_range:
-            return 1
-
-        total_pages = 0
-        page_ranges = page_range.split(',')
-
-        for range_str in page_ranges:
-            range_str = range_str.strip()
-
-            if ':' in range_str and '-' in range_str:
-                parts = range_str.split('-')
-                if len(parts) != 2:
-                    logger.warning(f"Invalid page range format: {range_str}")
-                    continue
-
-                start_page_parts = parts[0].split(':')
-                end_page_parts = parts[1].split(':')
-
-                if len(start_page_parts) != 2 or len(end_page_parts) != 2:
-                    logger.warning(f"Invalid page range format: {range_str}")
-                    continue
-
-                start_page = start_page_parts[-1].strip()
-                end_page = end_page_parts[-1].strip()
-            elif '-' in range_str:
-                parts = range_str.split('-')
-                if len(parts) != 2:
-                    logger.warning(f"Invalid page range format: {range_str}")
-                    continue
-
-                start_page, end_page = parts
-                start_page = start_page.split(':')[-1].strip()
-                end_page = end_page.split(':')[-1].strip()
-            else:
-                total_pages += 1
-                continue
-
-            # Convert roman numerals to integers if necessary
-            start_page = convert_to_int(start_page)
-            end_page = convert_to_int(end_page)
-
-            # Calculate the number of pages in the current range
-            num_pages = abs(end_page - start_page) + 1
-            total_pages += num_pages
-
-        return total_pages
-    except Exception as e:
-        logger.error(f"count_pages got this error: {e} - > args = {page_range}")
-        return 1
-
 
 def convert_to_int(page: str):
     try:
@@ -138,20 +87,56 @@ def convert_to_int(page: str):
 
 
 def update_dict_scores(result: dict, author: str, area_scores: str, this_hit_area: str,
-                       this_hit_score: Decimal) -> None:
+                       this_hit_score: Decimal, pub: str, pub_year: str) -> None:
     try:
+        # TODO move to a later point after all authors in a school have been done
         if this_hit_area not in result[area_scores]:
             result[area_scores][this_hit_area] = 0
 
         result[area_scores][this_hit_area] += this_hit_score
 
+        if this_hit_area not in result['area_paper_counts']:
+            result['area_paper_counts'][this_hit_area] = 0
+
+        result['area_paper_counts'][this_hit_area] += 1
+        # TODO move to a later point after all authors in a school have been done
+
+        # update author pub category score
         if this_hit_area not in result["authors"][author]:
             result["authors"][author][this_hit_area] = 0
-
         result["authors"][author][this_hit_area] += this_hit_score
+
+        # update author total pub count
         result["authors"][author]["paper_count"] += 1
+
+        # update author pub category score
+        if this_hit_area not in result["authors"][author]['area_paper_counts']:
+            result["authors"][author]['area_paper_counts'][this_hit_area] = {}
+
+        if 'area_adjusted_score' not in result["authors"][author]['area_paper_counts'][this_hit_area]:
+            result["authors"][author]['area_paper_counts'][this_hit_area]['area_adjusted_score'] = 0
+
+        result["authors"][author]['area_paper_counts'][this_hit_area]['area_adjusted_score'] += this_hit_score
+
+        if pub not in result["authors"][author]['area_paper_counts'][this_hit_area]:
+            result["authors"][author]['area_paper_counts'][this_hit_area][pub] = {}
+
+        if pub_year not in result["authors"][author]['area_paper_counts'][this_hit_area][pub]:
+            result["authors"][author]['area_paper_counts'][this_hit_area][pub][pub_year] = {}
+
+        if 'score' not in result["authors"][author]['area_paper_counts'][this_hit_area][pub][pub_year]:
+            result["authors"][author]['area_paper_counts'][this_hit_area][pub][pub_year]['score'] = 0
+
+        result["authors"][author]['area_paper_counts'][this_hit_area][pub][pub_year]['score'] += this_hit_score
+
+        if 'year_paper_count' not in result["authors"][author]['area_paper_counts'][this_hit_area][pub][pub_year]:
+            result["authors"][author]['area_paper_counts'][this_hit_area][pub][pub_year]['year_paper_count'] = 0
+
+        result["authors"][author]['area_paper_counts'][this_hit_area][pub][pub_year]['year_paper_count'] += 1
+
     except KeyError as e:
         logger.error(f"update_dict_scores encountered an error: {e}")
+        raise
 
 
 def calculate_score(json_data: dict, school_result: dict, author: str):
@@ -172,16 +157,18 @@ def calculate_score(json_data: dict, school_result: dict, author: str):
 
     for hit in hit_key_value:
         hit_info = hit["info"]
-        page_range = hit_info.get("pages", "1")
-        page_count = count_pages(page_range)
 
         this_hit_area = categorize_venue.categorize_venue(hit_info.get("venue"))
         if not this_hit_area:
             continue
 
+        page_range = hit_info.get("pages", "1")
+        page_count = page_range_counter.count_pages(page_range)
+
         if not page_count or page_count < min_page_count:
             continue
 
+        pub_year = hit_info.get('year', 0)
         this_hit_score = Decimal(0)
         hit_authors = hit_info.get("authors", None)
         if hit_authors:
@@ -194,7 +181,9 @@ def calculate_score(json_data: dict, school_result: dict, author: str):
             author=author,
             area_scores="area_scores",
             this_hit_area=this_hit_area,
-            this_hit_score=this_hit_score
+            this_hit_score=this_hit_score,
+            pub=hit_info.get("venue"),
+            pub_year=pub_year
         )
         total_score += this_hit_score
         school_result["total_score"] += total_score
@@ -207,9 +196,16 @@ def get_year_list() -> list:
 
 
 def retry_if_429_error(exception):
-    return isinstance(exception, requests.exceptions.RequestException) and exception.response.status_code == 429
+    if isinstance(exception, requests.exceptions.RequestException):
+        if exception.response is not None:
+            return exception.response.status_code == 429
+        else:
+            # Handle the case when response is None
+            return False
+    return False
 
 
+@retry(stop_max_attempt_number=3, wait_fixed=backoff_time_in_ms, retry_on_exception=retry_if_429_error)
 def send_get_request(api_url: str, school, author) -> dict | None:
     try:
         response = requests.get(api_url)
@@ -227,12 +223,11 @@ def send_get_request(api_url: str, school, author) -> dict | None:
                 logger.info(f"Too Many Requests, retrying after {backoff_time_in_seconds} seconds.")
             elif e.response.status_code == 500:
                 logger.error(f"Internal Server Error (500) occurred for URL: {api_url}")
-
                 missed_authors.add(f"{school.replace(' ', '-')} {author.replace(' ', '-')}")
                 return {}  # Return an empty dictionary to skip processing the response
             elif e.response.status_code == 413:
                 logger.error(f"Payload Too Large! {e}")
-                missed_authors.add(api_url)
+                missed_authors.add(f"{school.replace(' ', '-')} {author.replace(' ', '-')}")
                 return {}
             else:
                 logger.error(f"Error occurred during the request: {str(e)}")
@@ -247,7 +242,7 @@ def send_get_request(api_url: str, school, author) -> dict | None:
 
 def author_has_less_than_1001_hits(url: str, school: str, author: str) -> tuple:
     json_data = send_get_request(url, school, author)
-    result = False
+    result = None
     if json_data:
         hits = json_data["result"]["hits"]
         hit_key_value = hits.get("hit", [])
@@ -257,7 +252,6 @@ def author_has_less_than_1001_hits(url: str, school: str, author: str) -> tuple:
     return result, json_data
 
 
-@retry(stop_max_attempt_number=3, wait_fixed=backoff_time_in_ms, retry_on_exception=retry_if_429_error)
 def get_author_publication_score(author: str, school_result: dict, school: str):
     """
     Retrieves the publication score for a given author.
@@ -271,14 +265,21 @@ def get_author_publication_score(author: str, school_result: dict, school: str):
     :return: The publication score as a Decimal value.
     """
     url = generate_author_pub_count_api_url_with_year(author)
+
+    # if the author has less than 1001 pubs, only 1 API call is needed
     has_less_than_1001_hits, api_call_json = author_has_less_than_1001_hits(url, school, author)
     if has_less_than_1001_hits:
         calculate_score(api_call_json, school_result, author)
+
+    # otherwise call the DBLP API once for each year for the same author's pubs
     elif api_call_json:
         for year in get_year_list():
             api_url = generate_author_pub_count_api_url_with_year(author, year=year)
             result = send_get_request(api_url, school, author)
             calculate_score(result, school_result, author)
+
+    elif not has_less_than_1001_hits:
+        missed_authors.add(f"{school.replace(' ', '-')} {author.replace(' ', '-')}")
 
 
 def sum_dict_values(data: dict) -> Decimal:
@@ -299,6 +300,14 @@ def sum_dict_values(data: dict) -> Decimal:
     return total
 
 
+def get_filtered_dict(input_dict: dict, remove_keys: list):
+    filtered_dict = {}
+    for key, value in input_dict.items():
+        if key not in remove_keys:
+            filtered_dict[key] = value
+    return filtered_dict
+
+
 def calculate_institution_score(institution: str, df: pl.DataFrame) -> dict:
     logger.info(f"Calculating score for institution: {institution}")
 
@@ -314,7 +323,8 @@ def calculate_institution_score(institution: str, df: pl.DataFrame) -> dict:
     institution_result = {
         'total_score': Decimal(0),
         'area_scores': {},
-        'authors': {author: {'paper_count': 0} for author in authors}
+        'area_paper_counts': {},
+        'authors': {author: {'paper_count': 0, 'area_paper_counts': {}} for author in authors}
     }
 
     for author in authors:
@@ -324,7 +334,11 @@ def calculate_institution_score(institution: str, df: pl.DataFrame) -> dict:
     # Sum up the scores of all authors for the institution
     total_score = Decimal(0)
     for author_scores in institution_result['authors'].values():
-        total_score += sum_dict_values(author_scores)
+        scores = get_filtered_dict(
+            author_scores,
+            ['area_paper_counts', 'paper_count']
+        )
+        total_score += sum_dict_values(scores)
 
     institution_result['total_score'] = total_score
 
@@ -446,5 +460,4 @@ def run():
     log_total_time_taken(start_time, end_time)
 
 
-if __name__ == 'main':
-    run()
+run()
