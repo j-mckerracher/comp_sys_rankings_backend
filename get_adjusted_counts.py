@@ -211,9 +211,6 @@ def send_get_request(api_url: str, school, author) -> dict | None:
         response = requests.get(api_url)
         response.raise_for_status()  # Raise an exception for 4xx or 5xx status codes
 
-        logger.info(f"Request URL: {api_url}")
-        logger.info(f"Response code: {response.status_code}")
-
         if response.status_code == 200:
             return response.json()
 
@@ -328,7 +325,6 @@ def calculate_institution_score(institution: str, df: pl.DataFrame) -> dict:
     }
 
     for author in authors:
-        logger.info(f"Retrieving publication score for author: {author}")
         get_author_publication_score(author, institution_result, institution)
 
     # Sum up the scores of all authors for the institution
@@ -364,7 +360,7 @@ def generate_all_scores():
     for school in affiliations_set:
         school_score = calculate_institution_score(school, df_cs_rankings)
         school_scores[school] = school_score
-        write_dict_to_file(data=school_scores, file_path="all-school-scores")
+        write_dict_to_file(data=school_scores, file_path="old-scores/all-school-scores")
 
         processed_schools += 1
         percentage_completed = (processed_schools / total_schools) * 100
@@ -405,6 +401,11 @@ def format_time(seconds):
     return f"{int(days):02d}:{int(hours):02d}:{int(minutes):02d}:{int(seconds):02d}"
 
 
+def get_month_day_year():
+    now = datetime.now()
+    return now.strftime("%B-%d-%Y")
+
+
 def add_author_count(_data):
     new_data = {}
     for school, info in _data.items():
@@ -413,7 +414,7 @@ def add_author_count(_data):
         new_info["author_count"] = author_count
         new_data[school] = new_info
 
-    write_dict_to_file(data=new_data, file_path="all-school-scores-updated")
+    write_dict_to_file(data=new_data, file_path=f"all-school-scores-final-{get_month_day_year()}")
 
 
 def clean_data(_data: set):
@@ -430,17 +431,26 @@ def log_total_time_taken(start, end):
 
 
 def retry_missed_authors(school_scores):
-    while missed_authors:
-        for entry in missed_authors.copy():
-            school, author = entry.split(' ', 2)
-            school = school.replace('-', ' ')
-            author = author.replace('-', ' ')
-            url = generate_author_pub_count_api_url_with_year(author)
-            result = send_get_request(url, school, author)
-            if result:
-                calculate_score(result, school_scores[school], author)
-                missed_authors.remove(entry)
-        time.sleep(retry_interval_seconds)
+    iteration = 0
+    try:
+        while missed_authors and iteration < 16:
+            iteration += 1
+            for entry in missed_authors.copy():
+                school, author = entry.split(' ', 2)
+                school = school.replace('-', ' ')
+                author = author.replace('-', ' ')
+                url = generate_author_pub_count_api_url_with_year(author)
+                result = send_get_request(url, school, author)
+                if result:
+                    if author not in school_scores[school]['authors']:
+                        school_scores[school]['authors'][author] = {'paper_count': 0, 'area_paper_counts': {}}
+                    calculate_score(result, school_scores[school], author)
+                    missed_authors.remove(entry)
+            if len(missed_authors) > 0:
+                logger.info(f"Iteration: {iteration} -> missed = {missed_authors}")
+                time.sleep(retry_interval_seconds)
+    except Exception as e:
+        logger.error(f"retry_missed_authors got this error: {e}")
 
 
 def run():

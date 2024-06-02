@@ -65,7 +65,7 @@ class PageRangeCounter:
                 end_page = self.page_number_converter.convert_to_int(end_page)
 
                 if start_page > end_page:
-                    logger.warning(f"Invalid page range format: {range_str}")
+                    logger.warning(f"Invalid page range format: {range_str}. args = {page_range}")
                     continue
 
                 num_pages = abs(end_page - start_page) + 1
