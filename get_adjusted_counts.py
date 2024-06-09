@@ -72,7 +72,6 @@ def generate_author_pub_count_api_url_with_year(author, year=None):
     return f"{publication_url}{formatted_author}{json_format}"
 
 
-
 def convert_to_int(page: str):
     try:
         return int(page)
@@ -249,6 +248,29 @@ def author_has_less_than_1001_hits(url: str, school: str, author: str) -> tuple:
     return result, json_data
 
 
+def generate_author_search_api_url(author: str) -> str:
+    base_url = "https://dblp.dagstuhl.de/search/author/api"
+    formatted_author = quote(author)
+    json_format = "&h=1000&format=json"
+    return f"{base_url}?q={formatted_author}{json_format}"
+
+
+def get_author_url(author):
+    api_url = generate_author_search_api_url(author)
+    response_data = send_get_request(api_url, "", author)
+
+    if response_data:
+        hits = response_data.get("result", {}).get("hits", {}).get("hit", [])
+        if hits:
+            hit = hits[0]
+            if "info" in hit:
+                info = hit["info"]
+                if "url" in info:
+                    return info["url"]
+
+    return None
+
+
 def get_author_publication_score(author: str, school_result: dict, school: str):
     """
     Retrieves the publication score for a given author.
@@ -258,9 +280,12 @@ def get_author_publication_score(author: str, school_result: dict, school: str):
         'area_scores': {},
         'authors': {author: {} for author in authors}
     }
+    :param school: The name of the current school.
     :param author: The name of the author.
     :return: The publication score as a Decimal value.
     """
+    school_result['authors'][author]['dblp_link'] = get_author_url(author)
+
     url = generate_author_pub_count_api_url_with_year(author)
 
     # if the author has less than 1001 pubs, only 1 API call is needed
@@ -321,7 +346,7 @@ def calculate_institution_score(institution: str, df: pl.DataFrame) -> dict:
         'total_score': Decimal(0),
         'area_scores': {},
         'area_paper_counts': {},
-        'authors': {author: {'paper_count': 0, 'area_paper_counts': {}} for author in authors}
+        'authors': {author: {'dblp_link': '', 'paper_count': 0, 'area_paper_counts': {}} for author in authors}
     }
 
     for author in authors:
@@ -332,7 +357,7 @@ def calculate_institution_score(institution: str, df: pl.DataFrame) -> dict:
     for author_scores in institution_result['authors'].values():
         scores = get_filtered_dict(
             author_scores,
-            ['area_paper_counts', 'paper_count']
+            ['area_paper_counts', 'paper_count', 'dblp_link']
         )
         total_score += sum_dict_values(scores)
 
@@ -360,7 +385,7 @@ def generate_all_scores():
     for school in affiliations_set:
         school_score = calculate_institution_score(school, df_cs_rankings)
         school_scores[school] = school_score
-        write_dict_to_file(data=school_scores, file_path="old-scores/all-school-scores")
+        write_dict_to_file(data=school_scores, file_path="all-school-scores")
 
         processed_schools += 1
         percentage_completed = (processed_schools / total_schools) * 100
@@ -414,7 +439,7 @@ def add_author_count(_data):
         new_info["author_count"] = author_count
         new_data[school] = new_info
 
-    write_dict_to_file(data=new_data, file_path=f"all-school-scores-final-{get_month_day_year()}")
+    write_dict_to_file(data=new_data, file_path=f"all-school-scores-final-{get_month_day_year()}.json")
 
 
 def clean_data(_data: set):
@@ -442,7 +467,11 @@ def retry_missed_authors(school_scores):
                 url = generate_author_pub_count_api_url_with_year(author)
                 result = send_get_request(url, school, author)
                 if result:
+                    if school not in school_scores:
+                        logger.info(f"retry_missed_authors added this school: {school}")
+                        school_scores[school] = {}
                     if author not in school_scores[school]['authors']:
+                        logger.info(f"retry_missed_authors added this author: {author}")
                         school_scores[school]['authors'][author] = {'paper_count': 0, 'area_paper_counts': {}}
                     calculate_score(result, school_scores[school], author)
                     missed_authors.remove(entry)
