@@ -1,3 +1,4 @@
+import os.path
 import time
 import logging
 import json
@@ -23,7 +24,8 @@ class ScoreGenerator:
 
     def generate_all_scores(self):
         logger.info("Generating scores for all institutions")
-        df_cs_rankings = pl.read_csv(r'C:\Users\jmckerra\PycharmProjects\comp_sys_rankings_backend\files\csrankings.csv')
+        file_path = os.path.join('files', 'csrankings.csv')
+        df_cs_rankings = pl.read_csv(file_path)
 
         affiliations = df_cs_rankings['affiliation'].unique()
         prelim_affiliations_set = set(affiliations)
