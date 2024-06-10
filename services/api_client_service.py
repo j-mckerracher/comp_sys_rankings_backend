@@ -11,6 +11,15 @@ logger = logging.getLogger(__name__)
 backoff_time_in_ms = 180000
 
 
+def retry_if_429_error(exception):
+    if isinstance(exception, requests.exceptions.RequestException):
+        if exception.response is not None:
+            return exception.response.status_code == 429
+        else:
+            return False
+    return False
+
+
 class APIClient:
     def __init__(self):
         self.backoff_time_in_ms = 180000
@@ -27,14 +36,6 @@ class APIClient:
             formatted_year = f"%20year%3A{year}%3A"
             return f"{publication_url}{formatted_author}{formatted_year}{json_format}"
         return f"{publication_url}{formatted_author}{json_format}"
-
-    def retry_if_429_error(self, exception):
-        if isinstance(exception, requests.exceptions.RequestException):
-            if exception.response is not None:
-                return exception.response.status_code == 429
-            else:
-                return False
-        return False
 
     @retry(stop_max_attempt_number=3, wait_fixed=backoff_time_in_ms, retry_on_exception=retry_if_429_error)
     def send_get_request(self, api_url: str, school, author) -> dict | None:
