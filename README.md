@@ -145,6 +145,21 @@ Each institution object contains the following fields:
 
 This JSON structure allows for easy parsing and analysis of the institution and author data, including total scores, area-specific scores, paper counts, and detailed information about each author's publications in different venues and years.
 
+## Contributing
+
+We welcome contributions. If you would like to contribute, please follow these steps:
+
+1. Fork the repository
+2. Create a new branch for your changes
+3. Make your changes and commit them to your branch
+4. Create a pull request to merge your changes into the main repository
+
+Please ensure that your contributions adhere to the license terms and do not introduce any commercial or derivative elements.
+
+## Feedback and Support
+
+If you have any feedback, suggestions, or issues, please [open an issue](https://github.com/j-mckerracher/comp_sys_rankings_backend/issues) on the GitHub repository. We appreciate your input and will strive to address any concerns in a timely manner.
+
 ## License
 
 This code is covered by the Creative Commons Attribution-NonCommercial-NoDerivatives 4.0 International License. You are free to use and share the code for non-commercial purposes, but you must give appropriate credit, provide a link to the license, and indicate if changes were made. You may not use the code for commercial purposes or create derivatives of the code without permission.
