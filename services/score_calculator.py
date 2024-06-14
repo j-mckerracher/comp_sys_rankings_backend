@@ -18,49 +18,51 @@ class ScoreCalculator:
     def update_dict_scores(self, result: dict, author: str, area_scores: str, this_hit_area: str,
                            this_hit_score: Decimal, pub: str, pub_year: str) -> None:
         try:
-            if this_hit_area not in result[area_scores]:
-                result[area_scores][this_hit_area] = 0
-
-            result[area_scores][this_hit_area] += this_hit_score
-
-            if this_hit_area not in result['area_paper_counts']:
-                result['area_paper_counts'][this_hit_area] = 0
-
-            result['area_paper_counts'][this_hit_area] += 1
-
-            if this_hit_area not in result["authors"][author]:
-                result["authors"][author][this_hit_area] = 0
-            result["authors"][author][this_hit_area] += this_hit_score
-
-            result["authors"][author]["paper_count"] += 1
-
-            if this_hit_area not in result["authors"][author]['area_paper_counts']:
-                result["authors"][author]['area_paper_counts'][this_hit_area] = {}
-
-            if 'area_adjusted_score' not in result["authors"][author]['area_paper_counts'][this_hit_area]:
-                result["authors"][author]['area_paper_counts'][this_hit_area]['area_adjusted_score'] = 0
-
-            result["authors"][author]['area_paper_counts'][this_hit_area]['area_adjusted_score'] += this_hit_score
-
-            if pub not in result["authors"][author]['area_paper_counts'][this_hit_area]:
-                result["authors"][author]['area_paper_counts'][this_hit_area][pub] = {}
-
-            if pub_year not in result["authors"][author]['area_paper_counts'][this_hit_area][pub]:
-                result["authors"][author]['area_paper_counts'][this_hit_area][pub][pub_year] = {}
-
-            if 'score' not in result["authors"][author]['area_paper_counts'][this_hit_area][pub][pub_year]:
-                result["authors"][author]['area_paper_counts'][this_hit_area][pub][pub_year]['score'] = 0
-
-            result["authors"][author]['area_paper_counts'][this_hit_area][pub][pub_year]['score'] += this_hit_score
-
-            if 'year_paper_count' not in result["authors"][author]['area_paper_counts'][this_hit_area][pub][pub_year]:
-                result["authors"][author]['area_paper_counts'][this_hit_area][pub][pub_year]['year_paper_count'] = 0
-
-            result["authors"][author]['area_paper_counts'][this_hit_area][pub][pub_year]['year_paper_count'] += 1
-
+            self.update_area_scores(result, area_scores, this_hit_area, this_hit_score)
+            self.update_area_paper_counts(result, this_hit_area)
+            self.update_author_area_score(result, author, this_hit_area, this_hit_score)
+            self.update_author_paper_count(result, author)
+            self.update_author_area_paper_counts(result, author, this_hit_area, this_hit_score, pub, pub_year)
         except KeyError as e:
             logger.error(f"update_dict_scores encountered an error: {e}")
             raise
+
+    def update_area_scores(self, result: dict, area_scores: str, this_hit_area: str, this_hit_score: Decimal) -> None:
+        if this_hit_area not in result[area_scores]:
+            result[area_scores][this_hit_area] = 0
+        result[area_scores][this_hit_area] += this_hit_score
+
+    def update_area_paper_counts(self, result: dict, this_hit_area: str) -> None:
+        if this_hit_area not in result['area_paper_counts']:
+            result['area_paper_counts'][this_hit_area] = 0
+        result['area_paper_counts'][this_hit_area] += 1
+
+    def update_author_area_score(self, result: dict, author: str, this_hit_area: str, this_hit_score: Decimal) -> None:
+        if this_hit_area not in result["authors"][author]:
+            result["authors"][author][this_hit_area] = 0
+        result["authors"][author][this_hit_area] += this_hit_score
+
+    def update_author_paper_count(self, result: dict, author: str) -> None:
+        result["authors"][author]["paper_count"] += 1
+
+    def update_author_area_paper_counts(self, result: dict, author: str, this_hit_area: str, this_hit_score: Decimal,
+                                        pub: str, pub_year: str) -> None:
+        author_area_paper_counts = result["authors"][author]['area_paper_counts']
+        if this_hit_area not in author_area_paper_counts:
+            author_area_paper_counts[this_hit_area] = {}
+
+        if 'area_adjusted_score' not in author_area_paper_counts[this_hit_area]:
+            author_area_paper_counts[this_hit_area]['area_adjusted_score'] = 0
+        author_area_paper_counts[this_hit_area]['area_adjusted_score'] += this_hit_score
+
+        if pub not in author_area_paper_counts[this_hit_area]:
+            author_area_paper_counts[this_hit_area][pub] = {}
+
+        if pub_year not in author_area_paper_counts[this_hit_area][pub]:
+            author_area_paper_counts[this_hit_area][pub][pub_year] = {'score': 0, 'year_paper_count': 0}
+
+        author_area_paper_counts[this_hit_area][pub][pub_year]['score'] += this_hit_score
+        author_area_paper_counts[this_hit_area][pub][pub_year]['year_paper_count'] += 1
 
     def calculate_score(self, json_data: dict, school_result: dict, author: str):
         hits = json_data["result"]["hits"]
@@ -70,23 +72,16 @@ class ScoreCalculator:
         for hit in hit_key_value:
             hit_info = hit["info"]
 
-            this_hit_area = categorize_venue.categorize_venue(hit_info.get("venue"))
+            this_hit_area = self.get_hit_area(hit_info)
             if not this_hit_area:
                 continue
 
-            page_range = hit_info.get("pages", "1")
-            page_count = page_range_counter.count_pages(page_range)
-
-            if not page_count or page_count < self.api_client.min_page_count:
+            page_count = self.get_page_count(hit_info)
+            if not self.is_valid_page_count(page_count):
                 continue
 
             pub_year = hit_info.get('year', 0)
-            this_hit_score = Decimal(0)
-            hit_authors = hit_info.get("authors", None)
-            if hit_authors:
-                author_list = hit_authors["author"]
-                num_authors = len(author_list)
-                this_hit_score += Decimal(1) / Decimal(num_authors)
+            this_hit_score = self.calculate_hit_score(hit_info)
 
             self.update_dict_scores(
                 result=school_result,
@@ -99,6 +94,25 @@ class ScoreCalculator:
             )
             total_score += this_hit_score
             school_result["total_score"] += total_score
+
+    def get_hit_area(self, hit_info: dict) -> str:
+        return categorize_venue.categorize_venue(hit_info.get("venue"))
+
+    def get_page_count(self, hit_info: dict) -> int:
+        page_range = hit_info.get("pages", "1")
+        return page_range_counter.count_pages(page_range)
+
+    def is_valid_page_count(self, page_count: int) -> bool:
+        return page_count and page_count >= self.api_client.min_page_count
+
+    def calculate_hit_score(self, hit_info: dict) -> Decimal:
+        this_hit_score = Decimal(0)
+        hit_authors = hit_info.get("authors", None)
+        if hit_authors:
+            author_list = hit_authors["author"]
+            num_authors = len(author_list)
+            this_hit_score += Decimal(1) / Decimal(num_authors)
+        return this_hit_score
 
     def get_author_publication_score(self, author: str, school_result: dict, school: str):
         school_result['authors'][author]['dblp_link'] = self.api_client.get_author_url(author)

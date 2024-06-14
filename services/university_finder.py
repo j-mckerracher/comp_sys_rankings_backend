@@ -1,4 +1,5 @@
 import json
+import os
 
 
 class UniversityFinder:
@@ -19,4 +20,4 @@ class UniversityFinder:
 
 
 # source: https://public.opendatasoft.com/explore/dataset/us-colleges-and-universities/export/?flg=en-us
-finder = UniversityFinder(r"C:\Users\jmckerra\PycharmProjects\comp_sys_rankings_backend\files\us-colleges-and-universities.json")
+finder = UniversityFinder(os.path.join('files', 'us-colleges-and-universities.json'))
