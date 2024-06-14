@@ -168,7 +168,7 @@ For more information, please see the [Creative Commons Attribution-NonCommercial
 
 ## Acknowledgements
 
-This script utilizes data from the DBLP (Digital Bibliography & Library Project) database and CSRankings. We acknowledge and appreciate their efforts.
+This script utilizes data from the DBLP (Digital Bibliography & Library Project) database, CSRankings.org, and https://public.opendatasoft.com/. We acknowledge and appreciate their efforts.
 
 ## Contact
 

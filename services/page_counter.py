@@ -42,21 +42,9 @@ class PageRangeCounter:
                 range_str = range_str.strip()
 
                 if '-' in range_str:
-                    parts = range_str.split('-')
-                    if len(parts) == 3 and ':' in parts[0] and ':' in parts[2]:
-                        left_start_index = parts[0].index(':') + 1
-                        right_start_index = parts[2].index(':') + 1
-                        start_page = parts[0][left_start_index:]
-                        end_page = parts[2][right_start_index:]
-                    elif len(parts) == 2 and ': ' in parts[0] and ':' not in parts[1]:
-                        start_index = parts[0].index(':') + 1
-                        start_page = parts[0][start_index:].strip()
-                        end_page = parts[1].strip()
-                    elif len(parts) == 4 and parts[0].isalpha() and parts[2].isalpha():
-                        start_page, end_page = parts[1], parts[3]
-                    else:
-                        start_page = self.page_number_extractor.extract_page_number(parts[0].strip())
-                        end_page = self.page_number_extractor.extract_page_number(parts[1].strip())
+                    start_page, end_page = self.extract_start_end_pages(range_str)
+                    if start_page is None or end_page is None:
+                        continue
                 else:
                     total_pages += 1
                     continue
@@ -75,6 +63,35 @@ class PageRangeCounter:
         except Exception as e:
             logger.error(f"count_pages got this error: {e} - > args = {page_range}")
             return 1
+
+    def extract_start_end_pages(self, range_str: str) -> tuple:
+        parts = range_str.split('-')
+        if len(parts) == 3 and ':' in parts[0] and ':' in parts[2]:
+            return self.extract_pages_with_colons(parts)
+        elif len(parts) == 2 and ': ' in parts[0] and ':' not in parts[1]:
+            return self.extract_pages_with_colon_space(parts)
+        elif len(parts) == 4 and parts[0].isalpha() and parts[2].isalpha():
+            return parts[1], parts[3]
+        else:
+            return self.extract_pages_without_special_chars(parts)
+
+    def extract_pages_with_colons(self, parts: list) -> tuple:
+        left_start_index = parts[0].index(':') + 1
+        right_start_index = parts[2].index(':') + 1
+        start_page = parts[0][left_start_index:]
+        end_page = parts[2][right_start_index:]
+        return start_page, end_page
+
+    def extract_pages_with_colon_space(self, parts: list) -> tuple:
+        start_index = parts[0].index(':') + 1
+        start_page = parts[0][start_index:].strip()
+        end_page = parts[1].strip()
+        return start_page, end_page
+
+    def extract_pages_without_special_chars(self, parts: list) -> tuple:
+        start_page = self.page_number_extractor.extract_page_number(parts[0].strip())
+        end_page = self.page_number_extractor.extract_page_number(parts[1].strip())
+        return start_page, end_page
 
 
 page_number_converter = PageNumberConverter()
