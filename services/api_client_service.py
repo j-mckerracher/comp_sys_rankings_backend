@@ -2,6 +2,7 @@ import logging
 from urllib.parse import quote
 from retrying import retry
 import requests
+from services.api_json_keys import api_keys
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -72,8 +73,8 @@ class APIClient:
         json_data = self.send_get_request(url, school, author)
         result = None
         if json_data:
-            hits = json_data["result"]["hits"]
-            hit_key_value = hits.get("hit", [])
+            hits = json_data[api_keys.RESULT][api_keys.HITS]
+            hit_key_value = hits.get(api_keys.HIT, [])
             if len(hit_key_value) < 1001:
                 result = True
 
@@ -90,13 +91,13 @@ class APIClient:
         response_data = self.send_get_request(api_url, "", author)
 
         if response_data:
-            hits = response_data.get("result", {}).get("hits", {}).get("hit", [])
+            hits = response_data.get(api_keys.RESULT, {}).get(api_keys.HITS, {}).get(api_keys.HIT, [])
             if hits:
                 hit = hits[0]
-                if "info" in hit:
-                    info = hit["info"]
-                    if "url" in info:
-                        return info["url"]
+                if api_keys.INFO in hit:
+                    info = hit[api_keys.INFO]
+                    if api_keys.URL in info:
+                        return info[api_keys.URL]
 
         return None
 

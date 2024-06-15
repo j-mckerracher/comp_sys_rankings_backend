@@ -5,6 +5,8 @@ from datetime import datetime
 from services.area_conference_mapping import categorize_venue
 from services.page_counter import page_range_counter
 from services.api_client_service import api_client
+from services.dict_keys import json_keys
+from services.api_json_keys import api_keys
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -33,44 +35,44 @@ class ScoreCalculator:
         result[area_scores][this_hit_area] += this_hit_score
 
     def update_area_paper_counts(self, result: dict, this_hit_area: str) -> None:
-        if this_hit_area not in result['area_paper_counts']:
-            result['area_paper_counts'][this_hit_area] = 0
-        result['area_paper_counts'][this_hit_area] += 1
+        if this_hit_area not in result[json_keys.AREA_PAPER_COUNTS]:
+            result[json_keys.AREA_PAPER_COUNTS][this_hit_area] = 0
+        result[json_keys.AREA_PAPER_COUNTS][this_hit_area] += 1
 
     def update_author_area_score(self, result: dict, author: str, this_hit_area: str, this_hit_score: Decimal) -> None:
-        if this_hit_area not in result["authors"][author]:
-            result["authors"][author][this_hit_area] = 0
-        result["authors"][author][this_hit_area] += this_hit_score
+        if this_hit_area not in result[json_keys.AUTHORS][author]:
+            result[json_keys.AUTHORS][author][this_hit_area] = 0
+        result[json_keys.AUTHORS][author][this_hit_area] += this_hit_score
 
     def update_author_paper_count(self, result: dict, author: str) -> None:
-        result["authors"][author]["paper_count"] += 1
+        result[json_keys.AUTHORS][author][json_keys.PAPER_COUNT] += 1
 
     def update_author_area_paper_counts(self, result: dict, author: str, this_hit_area: str, this_hit_score: Decimal,
                                         pub: str, pub_year: str) -> None:
-        author_area_paper_counts = result["authors"][author]['area_paper_counts']
+        author_area_paper_counts = result[json_keys.AUTHORS][author][json_keys.AREA_PAPER_COUNTS]
         if this_hit_area not in author_area_paper_counts:
             author_area_paper_counts[this_hit_area] = {}
 
-        if 'area_adjusted_score' not in author_area_paper_counts[this_hit_area]:
-            author_area_paper_counts[this_hit_area]['area_adjusted_score'] = 0
-        author_area_paper_counts[this_hit_area]['area_adjusted_score'] += this_hit_score
+        if json_keys.AREA_ADJUSTED_SCORE not in author_area_paper_counts[this_hit_area]:
+            author_area_paper_counts[this_hit_area][json_keys.AREA_ADJUSTED_SCORE] = 0
+        author_area_paper_counts[this_hit_area][json_keys.AREA_ADJUSTED_SCORE] += this_hit_score
 
         if pub not in author_area_paper_counts[this_hit_area]:
             author_area_paper_counts[this_hit_area][pub] = {}
 
         if pub_year not in author_area_paper_counts[this_hit_area][pub]:
-            author_area_paper_counts[this_hit_area][pub][pub_year] = {'score': 0, 'year_paper_count': 0}
+            author_area_paper_counts[this_hit_area][pub][pub_year] = {json_keys.SCORE: 0, json_keys.YEAR_PAPER_COUNT: 0}
 
-        author_area_paper_counts[this_hit_area][pub][pub_year]['score'] += this_hit_score
-        author_area_paper_counts[this_hit_area][pub][pub_year]['year_paper_count'] += 1
+        author_area_paper_counts[this_hit_area][pub][pub_year][json_keys.SCORE] += this_hit_score
+        author_area_paper_counts[this_hit_area][pub][pub_year][json_keys.YEAR_PAPER_COUNT] += 1
 
     def calculate_score(self, json_data: dict, school_result: dict, author: str):
-        hits = json_data["result"]["hits"]
+        hits = json_data[api_keys.RESULT][api_keys.HITS]
         hit_key_value = hits.get("hit", [])
         total_score = Decimal(0)
 
         for hit in hit_key_value:
-            hit_info = hit["info"]
+            hit_info = hit[api_keys.INFO]
 
             this_hit_area = self.get_hit_area(hit_info)
             if not this_hit_area:
@@ -80,26 +82,26 @@ class ScoreCalculator:
             if not self.is_valid_page_count(page_count):
                 continue
 
-            pub_year = hit_info.get('year', 0)
+            pub_year = hit_info.get(api_keys.YEAR, 0)
             this_hit_score = self.calculate_hit_score(hit_info)
 
             self.update_dict_scores(
                 result=school_result,
                 author=author,
-                area_scores="area_scores",
+                area_scores=json_keys.AREA_SCORES,
                 this_hit_area=this_hit_area,
                 this_hit_score=this_hit_score,
-                pub=hit_info.get("venue"),
+                pub=hit_info.get(api_keys.VENUE),
                 pub_year=pub_year
             )
             total_score += this_hit_score
-            school_result["total_score"] += total_score
+            school_result[json_keys.TOTAL_SCORE] += total_score
 
     def get_hit_area(self, hit_info: dict) -> str:
-        return categorize_venue.categorize_venue(hit_info.get("venue"))
+        return categorize_venue.categorize_venue(hit_info.get(api_keys.VENUE))
 
     def get_page_count(self, hit_info: dict) -> int:
-        page_range = hit_info.get("pages", "1")
+        page_range = hit_info.get(api_keys.PAGES, "1")
         return page_range_counter.count_pages(page_range)
 
     def is_valid_page_count(self, page_count: int) -> bool:
@@ -107,7 +109,7 @@ class ScoreCalculator:
 
     def calculate_hit_score(self, hit_info: dict) -> Decimal:
         this_hit_score = Decimal(0)
-        hit_authors = hit_info.get("authors", None)
+        hit_authors = hit_info.get(json_keys.AUTHORS, None)
         if hit_authors:
             author_list = hit_authors["author"]
             num_authors = len(author_list)
@@ -115,7 +117,7 @@ class ScoreCalculator:
         return this_hit_score
 
     def get_author_publication_score(self, author: str, school_result: dict, school: str):
-        school_result['authors'][author]['dblp_link'] = self.api_client.get_author_url(author)
+        school_result[json_keys.AUTHORS][author][json_keys.DBLP_LINK] = self.api_client.get_author_url(author)
 
         url = self.api_client.generate_author_pub_count_api_url_with_year(author)
 

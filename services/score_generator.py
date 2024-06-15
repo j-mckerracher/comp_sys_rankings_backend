@@ -10,6 +10,7 @@ from services.decimal_encoder import DecimalEncoder
 from services.api_client_service import api_client
 from services.score_calculator import score_calc_service
 from services.institution_score_calculator import school_score_calculator
+from services.dict_keys import json_keys
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -67,9 +68,9 @@ class ScoreGenerator:
     def add_author_count(_data):
         new_data = {}
         for school, info in _data.items():
-            author_count = len(info["authors"])
+            author_count = len(info[json_keys.AUTHORS])
             new_info = info.copy()
-            new_info["author_count"] = author_count
+            new_info[json_keys.AUTHOR_COUNT] = author_count
             new_data[school] = new_info
 
         ScoreGenerator.write_dict_to_file(data=new_data, file_path=f"all-school-scores-final-{ScoreGenerator.get_month_day_year()}.json")
@@ -96,6 +97,7 @@ class ScoreGenerator:
         return f"{int(days):02d}:{int(hours):02d}:{int(minutes):02d}:{int(seconds):02d}"
 
     def retry_missed_authors(self, school_scores):
+        logger.info("Trying to get data for missed authors.")
         iteration = 0
         try:
             while self.api_client.missed_authors and iteration < 16:
@@ -110,9 +112,10 @@ class ScoreGenerator:
                         if school not in school_scores:
                             logger.info(f"retry_missed_authors added this school: {school}")
                             school_scores[school] = {}
-                        if author not in school_scores[school]['authors']:
+                        if author not in school_scores[school][json_keys.AUTHORS]:
                             logger.info(f"retry_missed_authors added this author: {author}")
-                            school_scores[school]['authors'][author] = {'paper_count': 0, 'area_paper_counts': {}}
+                            school_scores[school][json_keys.AUTHORS][author] = {json_keys.PAPER_COUNT: 0, json_keys.AREA_PAPER_COUNTS: {}}
+                        logger.info(f"Adding data for missed author: {author} at {school}")
                         self.score_calculator.calculate_score(result, school_scores[school], author)
                         self.api_client.missed_authors.remove(entry)
                 if len(self.api_client.missed_authors) > 0:
