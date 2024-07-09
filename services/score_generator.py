@@ -68,7 +68,8 @@ class ScoreGenerator:
     def add_author_count(_data):
         new_data = {}
         for school, info in _data.items():
-            author_count = len(info[json_keys.AUTHORS])
+            authors_dict = info.get(json_keys.AUTHORS, [])
+            author_count = len(authors_dict)
             new_info = info.copy()
             new_info[json_keys.AUTHOR_COUNT] = author_count
             new_data[school] = new_info
