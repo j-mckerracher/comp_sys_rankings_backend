@@ -1,4 +1,5 @@
 import logging
+import time
 from urllib.parse import quote
 from retrying import retry
 import requests
@@ -38,9 +39,10 @@ class APIClient:
             return f"{publication_url}{formatted_author}{formatted_year}{json_format}"
         return f"{publication_url}{formatted_author}{json_format}"
 
-    @retry(stop_max_attempt_number=3, wait_fixed=backoff_time_in_ms, retry_on_exception=retry_if_429_error)
+    @retry(stop_max_attempt_number=5, wait_fixed=backoff_time_in_ms, retry_on_exception=retry_if_429_error)
     def send_get_request(self, api_url: str, school, author) -> dict | None:
         try:
+            time.sleep(1)
             response = requests.get(api_url)
             response.raise_for_status()
 

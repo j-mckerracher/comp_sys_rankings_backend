@@ -25,7 +25,7 @@ class ScoreGenerator:
 
     def generate_all_scores(self):
         logger.info("Generating scores for all institutions")
-        file_path = os.path.join('files', 'csrankings.csv')
+        file_path = os.path.join('files', 'faculty-list.csv')
         df_cs_rankings = pl.read_csv(file_path)
 
         affiliations = df_cs_rankings['affiliation'].unique()
