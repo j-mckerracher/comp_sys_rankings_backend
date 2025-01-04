@@ -30,7 +30,7 @@ This code calculates scores for institutions based on author publication data fr
 ## Usage
 
 1. Prepare the input CSV file:
-   - The input CSV file should contain institution and author information. The file used here comes from CSRankings.org
+   - The input CSV file should contain institution and author information. The file used here (faculty-list.csv) comes from the [comp-sys-rankings-faculty-list-generator](https://github.com/j-mckerracher/comp-sys-rankings-faculty-list-generator) service.
    - The file should have columns: `affiliation`, `name`, and `scholarid`.
    - Update the file path in the `generate_all_scores()` function of the `ScoreGenerator` class.
 
